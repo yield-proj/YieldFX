@@ -41,6 +41,7 @@ import javafx.scene.text.FontPosture;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 import javafx.scene.transform.Affine;
+import javafx.scene.transform.Rotate;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
@@ -58,11 +59,11 @@ public class YieldFX extends Application implements RenderMaster {
     private int mouseX, mouseY;
     private YldTask threadTask;
     private Scene scene;
+    private float deltaTime;
+    private long last;
 
     private final Map<Integer, MediaPlayer> players = new HashMap<>();
     private final Map<Integer, Integer> playersLoop = new HashMap<>();
-
-    private Affine affinetransform = new Affine();
     private static YieldFX yieldFX;
 
     private static YldTask after;
@@ -74,7 +75,6 @@ public class YieldFX extends Application implements RenderMaster {
         if (after != null)
             after.execute();
         after = null;
-        //YldGame.launch(game, gameConfiguration);
     }
 
     private int initialWidth, initialHeight;
@@ -83,6 +83,10 @@ public class YieldFX extends Application implements RenderMaster {
 
     public static Color toFXColor(com.xebisco.yield.Color color) {
         return new Color(color.getR(), color.getG(), color.getB(), color.getA());
+    }
+
+    public static com.xebisco.yield.Color toYieldColor(Color color) {
+        return new com.xebisco.yield.Color((float) color.getRed(), (float) color.getGreen(), (float) color.getBlue(), (float) color.getOpacity());
     }
 
     @Override
@@ -106,6 +110,11 @@ public class YieldFX extends Application implements RenderMaster {
             throw new RuntimeException(e);
         }
         return yieldFX;
+    }
+
+    public void rotate(GraphicsContext gc, float angle, float px, float py) {
+        Rotate r = new Rotate(angle, px, py);
+        gc.setTransform(r.getMxx(), r.getMyx(), r.getMxy(), r.getMyy(), r.getTx(), r.getTy());
     }
 
     @Override
@@ -139,6 +148,7 @@ public class YieldFX extends Application implements RenderMaster {
             if (configuration.runOnThisThread) {
                 throw new YieldFXException("YieldFX needs to have the 'runOnThisThread' option to be false.");
             }
+            final int[] antiCrash = new int[]{0};
             new AnimationTimer() {
                 @Override
                 public void handle(long l) {
@@ -146,7 +156,14 @@ public class YieldFX extends Application implements RenderMaster {
                     canvas.setScaleY(scene.getHeight() / canvas.getHeight());
                     canvas.setTranslateX(scene.getWidth() / 2f - initialWidth / 2f);
                     canvas.setTranslateY(scene.getHeight() / 2f - initialHeight / 2f);
+                    antiCrash[0]++;
+                    if (antiCrash[0] > 60f / (float) configuration.fps + 2) {
+                        threadTask.execute();
+                        antiCrash[0] = 0;
+                    }
                     if (bgColor != null) {
+                        antiCrash[0] = 0;
+                        deltaTime = (System.currentTimeMillis() - last) / 1000f;
                         g.setFill(bgColor);
                         bgColor = null;
                         g.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
@@ -158,8 +175,8 @@ public class YieldFX extends Application implements RenderMaster {
                                         renderable.setSpecificColor(toFXColor(renderable.getColor()));
                                     g.setFill((Color) renderable.getSpecificColor());
                                 }
-                                g.setTransform(affinetransform.clone());
-                                g.rotate(Math.toRadians(-renderable.getRotation()));
+                                g.save();
+                                rotate(g, -renderable.getRotation(), renderable.getX(), renderable.getY());
                                 switch (renderable.getType()) {
                                     case LINE:
                                         g.setLineWidth(renderable.getThickness());
@@ -198,9 +215,11 @@ public class YieldFX extends Application implements RenderMaster {
                                         g.fillText(ss[0], renderable.getX() - getStringWidth(ss[0], ss[1]) / 2f, renderable.getY() + getStringHeight(ss[0], ss[1]) / 4f);
                                         break;
                                 }
+                                g.restore();
                             }
                         } catch (ConcurrentModificationException ignore) {
                         }
+                        last = System.currentTimeMillis();
                         threadTask.execute();
                     }
                 }
@@ -246,7 +265,7 @@ public class YieldFX extends Application implements RenderMaster {
 
     @Override
     public float fpsCount() {
-        return 0;
+        return 1000f / (deltaTime * 1000f);
     }
 
     @Override
@@ -531,7 +550,12 @@ public class YieldFX extends Application implements RenderMaster {
 
     @Override
     public com.xebisco.yield.Color[][] getTextureColors(Texture texture) {
-        return new com.xebisco.yield.Color[0][];
+        final com.xebisco.yield.Color[][] colors = new com.xebisco.yield.Color[texture.getWidth()][texture.getHeight()];
+        for (int x = 0; x < texture.getWidth(); x++)
+            for (int y = 0; y < texture.getHeight(); y++) {
+                colors[x][y] = toYieldColor(((Image) texture.getSpecificImage()).getPixelReader().getColor(x, y));
+            }
+        return colors;
     }
 
     @Override
@@ -666,14 +690,6 @@ public class YieldFX extends Application implements RenderMaster {
         return playersLoop;
     }
 
-    public Affine getAffinetransform() {
-        return affinetransform;
-    }
-
-    public void setAffinetransform(Affine affinetransform) {
-        this.affinetransform = affinetransform;
-    }
-
     public int getInitialWidth() {
         return initialWidth;
     }
@@ -704,5 +720,29 @@ public class YieldFX extends Application implements RenderMaster {
 
     public static void setAfter(YldTask after) {
         YieldFX.after = after;
+    }
+
+    public float getDeltaTime() {
+        return deltaTime;
+    }
+
+    public void setDeltaTime(float deltaTime) {
+        this.deltaTime = deltaTime;
+    }
+
+    public long getLast() {
+        return last;
+    }
+
+    public void setLast(long last) {
+        this.last = last;
+    }
+
+    public static YieldFX getYieldFX() {
+        return yieldFX;
+    }
+
+    public static void setYieldFX(YieldFX yieldFX) {
+        YieldFX.yieldFX = yieldFX;
     }
 }

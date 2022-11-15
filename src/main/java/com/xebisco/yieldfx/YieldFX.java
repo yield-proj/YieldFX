@@ -23,6 +23,7 @@ import com.xebisco.yield.render.Renderable;
 import com.xebisco.yield.render.RenderableType;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.SnapshotParameters;
@@ -44,10 +45,6 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 
 public class YieldFX extends Application implements RenderMaster {
@@ -66,134 +63,23 @@ public class YieldFX extends Application implements RenderMaster {
     private final Map<Integer, Integer> playersLoop = new HashMap<>();
 
     private Affine affinetransform = new Affine();
+    private static YieldFX yieldFX;
+
+    private static YldTask after;
 
     @Override
     public void start(Stage stage) {
         this.stage = stage;
-        Yld.getDebugLogger().log("YieldFX: Launching application on stage '" + stage + "'");
-        scene = new Scene(root = new Group());
-        scene.setOnKeyPressed(e -> pressing.add(e.getCode().getCode()));
-        scene.setOnKeyReleased(e -> pressing.remove(e.getCode().getCode()));
-        scene.setOnMouseMoved(e -> {
-            mouseX = (int) (e.getX() / stage.getWidth() * canvas.getWidth());
-            mouseY = (int) (e.getY() / stage.getHeight() * canvas.getHeight());
-        });
-        scene.setOnMousePressed(e -> pressing.add(-e.getButton().ordinal()));
-        scene.setOnMouseReleased(e -> pressing.remove(-e.getButton().ordinal()));
-        stage.setScene(scene);
-        stage.setOnCloseRequest(e -> Yld.exit());
-        root.getChildren().add(canvas);
-        GraphicsContext g = canvas.getGraphicsContext2D();
-        g.setImageSmoothing(false);
-        g.setFill(Color.RED);
-        g.fillRect(0, 0, 100, 100);
-        String clazz, config;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(Objects.requireNonNull(YieldFX.class.getResourceAsStream("/launch.txt"))))) {
-            clazz = reader.readLine();
-            config = reader.readLine();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        YldGame game;
-        try {
-            game = (YldGame) Class.forName(clazz).getConstructor().newInstance();
-        } catch (InstantiationException | IllegalAccessException | InvocationTargetException | ClassNotFoundException |
-                 NoSuchMethodException e) {
-            throw new RuntimeException(e);
-        }
-        GameConfiguration gameConfiguration = new GameConfiguration();
-        RelativeFile relativeFile = new RelativeFile("config");
-        relativeFile.setInputStream(Objects.requireNonNull(YieldFX.class.getResourceAsStream("/" + config)));
-        Ini.file(relativeFile, gameConfiguration);
-        if (gameConfiguration.undecorated)
-            stage.initStyle(StageStyle.UNDECORATED);
-        stage.setWidth(gameConfiguration.width);
-        stage.setHeight(gameConfiguration.height);
-        stage.setResizable(gameConfiguration.resizable);
-        stage.setAlwaysOnTop(gameConfiguration.alwaysOnTop);
-        stage.setFullScreen(gameConfiguration.fullscreen);
-        stage.setTitle(gameConfiguration.title);
-        gameConfiguration.renderMaster = this;
-        if (gameConfiguration.runOnThisThread) {
-            throw new YieldFXException("YieldFX needs to have the 'runOnThisThread' option to be false.");
-        }
-        new AnimationTimer() {
-            @Override
-            public void handle(long l) {
-                canvas.setScaleX(scene.getWidth() / canvas.getWidth());
-                canvas.setScaleY(scene.getHeight() / canvas.getHeight());
-                canvas.setTranslateX(scene.getWidth() / 2f - initialWidth / 2f);
-                canvas.setTranslateY(scene.getHeight() / 2f - initialHeight / 2f);
-                if (bgColor != null) {
-                    g.setFill(bgColor);
-                    bgColor = null;
-                    g.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
-                    g.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
-                    try {
-                        for (Renderable renderable : renderables) {
-                            if (renderable.getType() != RenderableType.IMAGE) {
-                                if (renderable.getSpecificColor() == null)
-                                    renderable.setSpecificColor(toFXColor(renderable.getColor()));
-                                g.setFill((Color) renderable.getSpecificColor());
-                            }
-                            g.setTransform(affinetransform.clone());
-                            g.rotate(Math.toRadians(-renderable.getRotation()));
-                            switch (renderable.getType()) {
-                                case LINE:
-                                    g.setLineWidth(renderable.getThickness());
-                                    g.strokeLine(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getX() + renderable.getWidth() / 2f, renderable.getY() + renderable.getHeight() / 2f);
-                                    break;
-                                case RECTANGLE:
-                                    if (renderable.isFilled())
-                                        g.fillRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
-                                    else {
-                                        g.setLineWidth(renderable.getThickness());
-                                        g.strokeRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
-                                    }
-                                    break;
-                                case OVAL:
-                                    if (renderable.isFilled())
-                                        g.fillOval(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
-                                    else {
-                                        g.setLineWidth(renderable.getThickness());
-                                        g.strokeOval(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
-                                    }
-                                    break;
-                                case ROUNDED_RECTANGLE:
-                                    if (renderable.isFilled())
-                                        g.fillRoundRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight(), renderable.getArcWidth(), renderable.getArcHeight());
-                                    else {
-                                        g.setLineWidth(renderable.getThickness());
-                                        g.strokeRoundRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight(), renderable.getArcWidth(), renderable.getArcHeight());
-                                    }
-                                    break;
-                                case IMAGE:
-                                    g.drawImage((Image) renderable.getSpecific(), renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
-                                    break;
-                                case TEXT:
-                                    String[] ss = renderable.getSpecific().toString().split("\1");
-                                    g.setFont(fonts.get(ss[1]));
-                                    g.fillText(ss[0], renderable.getX() - getStringWidth(ss[0], ss[1]) / 2f, renderable.getY() + getStringHeight(ss[0], ss[1]) / 4f);
-                                    break;
-                            }
-                        }
-                    } catch (ConcurrentModificationException ignore) {
-                    }
-                    threadTask.execute();
-                }
-            }
-        }.start();
-
-        YldGame.launch(game, gameConfiguration);
+        yieldFX = this;
+        if (after != null)
+            after.execute();
+        after = null;
+        //YldGame.launch(game, gameConfiguration);
     }
 
     private int initialWidth, initialHeight;
 
     private Color bgColor;
-
-    public static void main(String[] args) {
-        launch(args);
-    }
 
     public static Color toFXColor(com.xebisco.yield.Color color) {
         return new Color(color.getR(), color.getG(), color.getB(), color.getA());
@@ -204,12 +90,127 @@ public class YieldFX extends Application implements RenderMaster {
         this.renderables = renderables;
     }
 
+    public static YieldFX getInstance() {
+        Object o = new Object();
+        after = () -> {
+            synchronized (o) {
+                o.notify();
+            }
+        };
+        YldConcurrency.runTask(Application::launch);
+        try {
+            synchronized (o) {
+                o.wait();
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        return yieldFX;
+    }
+
     @Override
     public SampleWindow initWindow(WindowConfiguration windowConfiguration) {
-        stage.getIcons().add((Image) windowConfiguration.icon.getSpecificImage());
-        stage.show();
-        stage.setWidth(windowConfiguration.width + (stage.getWidth() - scene.getWidth()));
-        stage.setHeight(windowConfiguration.height + (stage.getHeight() - scene.getHeight()));
+        GameConfiguration configuration = (GameConfiguration) windowConfiguration;
+        Platform.runLater(() -> {
+            Yld.getDebugLogger().log("YieldFX: Launching stage '" + stage + "'");
+            scene = new Scene(root = new Group());
+            scene.setOnKeyPressed(e -> pressing.add(e.getCode().getCode()));
+            scene.setOnKeyReleased(e -> pressing.remove(e.getCode().getCode()));
+            scene.setOnMouseMoved(e -> {
+                mouseX = (int) (e.getX() / stage.getWidth() * canvas.getWidth());
+                mouseY = (int) (e.getY() / stage.getHeight() * canvas.getHeight());
+            });
+            scene.setOnMousePressed(e -> pressing.add(-e.getButton().ordinal()));
+            scene.setOnMouseReleased(e -> pressing.remove(-e.getButton().ordinal()));
+            stage.setScene(scene);
+            stage.setOnCloseRequest(e -> Yld.exit());
+            root.getChildren().add(canvas);
+            GraphicsContext g = canvas.getGraphicsContext2D();
+            g.setImageSmoothing(false);
+            if (configuration.undecorated)
+                stage.initStyle(StageStyle.UNDECORATED);
+            stage.setWidth(configuration.width);
+            stage.setHeight(configuration.height);
+            stage.setResizable(configuration.resizable);
+            stage.setAlwaysOnTop(configuration.alwaysOnTop);
+            stage.setFullScreen(configuration.fullscreen);
+            stage.setTitle(configuration.title);
+            configuration.renderMaster = this;
+            if (configuration.runOnThisThread) {
+                throw new YieldFXException("YieldFX needs to have the 'runOnThisThread' option to be false.");
+            }
+            new AnimationTimer() {
+                @Override
+                public void handle(long l) {
+                    canvas.setScaleX(scene.getWidth() / canvas.getWidth());
+                    canvas.setScaleY(scene.getHeight() / canvas.getHeight());
+                    canvas.setTranslateX(scene.getWidth() / 2f - initialWidth / 2f);
+                    canvas.setTranslateY(scene.getHeight() / 2f - initialHeight / 2f);
+                    if (bgColor != null) {
+                        g.setFill(bgColor);
+                        bgColor = null;
+                        g.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+                        g.fillRect(0, 0, canvas.getWidth(), canvas.getHeight());
+                        try {
+                            for (Renderable renderable : renderables) {
+                                if (renderable.getType() != RenderableType.IMAGE) {
+                                    if (renderable.getSpecificColor() == null)
+                                        renderable.setSpecificColor(toFXColor(renderable.getColor()));
+                                    g.setFill((Color) renderable.getSpecificColor());
+                                }
+                                g.setTransform(affinetransform.clone());
+                                g.rotate(Math.toRadians(-renderable.getRotation()));
+                                switch (renderable.getType()) {
+                                    case LINE:
+                                        g.setLineWidth(renderable.getThickness());
+                                        g.strokeLine(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getX() + renderable.getWidth() / 2f, renderable.getY() + renderable.getHeight() / 2f);
+                                        break;
+                                    case RECTANGLE:
+                                        if (renderable.isFilled())
+                                            g.fillRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
+                                        else {
+                                            g.setLineWidth(renderable.getThickness());
+                                            g.strokeRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
+                                        }
+                                        break;
+                                    case OVAL:
+                                        if (renderable.isFilled())
+                                            g.fillOval(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
+                                        else {
+                                            g.setLineWidth(renderable.getThickness());
+                                            g.strokeOval(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
+                                        }
+                                        break;
+                                    case ROUNDED_RECTANGLE:
+                                        if (renderable.isFilled())
+                                            g.fillRoundRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight(), renderable.getArcWidth(), renderable.getArcHeight());
+                                        else {
+                                            g.setLineWidth(renderable.getThickness());
+                                            g.strokeRoundRect(renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight(), renderable.getArcWidth(), renderable.getArcHeight());
+                                        }
+                                        break;
+                                    case IMAGE:
+                                        g.drawImage((Image) renderable.getSpecific(), renderable.getX() - renderable.getWidth() / 2f, renderable.getY() - renderable.getHeight() / 2f, renderable.getWidth(), renderable.getHeight());
+                                        break;
+                                    case TEXT:
+                                        String[] ss = renderable.getSpecific().toString().split("\1");
+                                        g.setFont(fonts.get(ss[1]));
+                                        g.fillText(ss[0], renderable.getX() - getStringWidth(ss[0], ss[1]) / 2f, renderable.getY() + getStringHeight(ss[0], ss[1]) / 4f);
+                                        break;
+                                }
+                            }
+                        } catch (ConcurrentModificationException ignore) {
+                        }
+                        threadTask.execute();
+                    }
+                }
+            }.start();
+            stage.getIcons().add((Image) windowConfiguration.icon.getSpecificImage());
+            stage.show();
+            stage.setWidth(windowConfiguration.width + (stage.getWidth() - scene.getWidth()));
+            stage.setHeight(windowConfiguration.height + (stage.getHeight() - scene.getHeight()));
+        });
+
         return new SampleWindow() {
             @Override
             public int getWidth() {
@@ -413,30 +414,39 @@ public class YieldFX extends Application implements RenderMaster {
         xy.setVisualUtils(this);
 
         Canvas c = new Canvas(image.getWidth(), image.getHeight());
-        GraphicsContext g = c.getGraphicsContext2D();
-        g.clearRect(0, 0, c.getWidth(), c.getHeight());
-        g.drawImage(image, image.getWidth(), 0, -image.getWidth(), image.getHeight());
-        g.save();
-        WritableImage xi = new WritableImage(texture.getWidth(), texture.getHeight());
-        c.snapshot(new SnapshotParameters(), xi);
-        x.setSpecificImage(xi);
 
-        g.clearRect(0, 0, c.getWidth(), c.getHeight());
-        g.drawImage(image, 0, image.getHeight(), image.getWidth(), -image.getHeight());
-        g.save();
-        WritableImage yi = new WritableImage(texture.getWidth(), texture.getHeight());
-        c.snapshot(new SnapshotParameters(), yi);
-        y.setSpecificImage(yi);
+        Platform.runLater(() -> {
+            GraphicsContext g = c.getGraphicsContext2D();
+            g.clearRect(0, 0, c.getWidth(), c.getHeight());
+            g.drawImage(image, image.getWidth(), 0, -image.getWidth(), image.getHeight());
+            g.save();
+            WritableImage xi = new WritableImage(texture.getWidth(), texture.getHeight());
+            c.snapshot(new SnapshotParameters(), xi);
+            x.setSpecificImage(xi);
 
-        g.clearRect(0, 0, c.getWidth(), c.getHeight());
-        g.drawImage(image, image.getWidth(), image.getHeight(), -image.getWidth(), -image.getHeight());
-        g.save();
-        WritableImage xyi = new WritableImage(texture.getWidth(), texture.getHeight());
-        c.snapshot(new SnapshotParameters(), xyi);
-        y.setSpecificImage(xyi);
+            g.clearRect(0, 0, c.getWidth(), c.getHeight());
+            g.drawImage(image, 0, image.getHeight(), image.getWidth(), -image.getHeight());
+            g.save();
+            WritableImage yi = new WritableImage(texture.getWidth(), texture.getHeight());
+            c.snapshot(new SnapshotParameters(), yi);
+            y.setSpecificImage(yi);
+
+
+            g.clearRect(0, 0, c.getWidth(), c.getHeight());
+            g.drawImage(image, image.getWidth(), image.getHeight(), -image.getWidth(), -image.getHeight());
+            g.save();
+            WritableImage xyi = new WritableImage(texture.getWidth(), texture.getHeight());
+            c.snapshot(new SnapshotParameters(), xyi);
+            xy.setSpecificImage(xyi);
+
+        });
+        texture.setInvertedX(x);
+        texture.setInvertedY(y);
+        texture.setInvertedXY(xy);
 
         if (texture.isFlushAfterLoad())
             texture.flush();
+
     }
 
     public static WritableImage copyImage(Image image) {
@@ -527,8 +537,8 @@ public class YieldFX extends Application implements RenderMaster {
     @Override
     public void setTextureColors(Texture texture, com.xebisco.yield.Color[][] colors) {
         PixelWriter writer = ((WritableImage) texture.getSpecificImage()).getPixelWriter();
-        for(int x = 0; x < colors.length; x++)
-            for(int y = 0; y < colors[0].length; y++)
+        for (int x = 0; x < colors.length; x++)
+            for (int y = 0; y < colors[0].length; y++)
                 writer.setColor(x, y, new Color(colors[x][y].getR(), colors[x][y].getG(), colors[x][y].getB(), colors[x][y].getA()));
     }
 
@@ -686,5 +696,13 @@ public class YieldFX extends Application implements RenderMaster {
 
     public void setBgColor(Color bgColor) {
         this.bgColor = bgColor;
+    }
+
+    public static YldTask getAfter() {
+        return after;
+    }
+
+    public static void setAfter(YldTask after) {
+        YieldFX.after = after;
     }
 }

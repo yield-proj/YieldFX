@@ -578,8 +578,10 @@ public class YieldFX extends Application implements RenderMaster {
         GraphicsContext g = c.getGraphicsContext2D();
         g.drawImage((Image) texture.getSpecificImage(), -i, -i1);
         WritableImage image = new WritableImage(i2, i3);
-        c.snapshot(new SnapshotParameters(), image);
-        loadTexture(tex, image);
+        Platform.runLater(() -> {
+            c.snapshot(new SnapshotParameters(), image);
+            loadTexture(tex, image);
+        });
         return tex;
     }
 
@@ -598,8 +600,10 @@ public class YieldFX extends Application implements RenderMaster {
         g.drawImage((Image) texture.getSpecificImage(), vector2.x, vector2.y);
         g.drawImage((Image) texture1.getSpecificImage(), vector21.x, vector21.y);
         WritableImage image = new WritableImage(texture.getWidth(), texture.getHeight());
-        c.snapshot(new SnapshotParameters(), image);
-        loadTexture(tex, image);
+        Platform.runLater(() -> {
+            c.snapshot(new SnapshotParameters(), image);
+            loadTexture(tex, image);
+        });
         return tex;
     }
 
